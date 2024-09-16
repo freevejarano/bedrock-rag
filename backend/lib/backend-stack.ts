@@ -29,39 +29,17 @@ export class BackendStack extends Stack {
 
     /** Knowledge Base */
 
-    const knowledgeBase = new bedrock.KnowledgeBase(this, "knowledgeBase", {
-      embeddingsModel: bedrock.BedrockFoundationModel.TITAN_EMBED_TEXT_V1,
-    });
+    // Suponiendo que ya tienes el ID de la base de conocimientos almacenado en alguna parte
+    const knowledgeBaseId = "K17E5D1Q2X"; // Reemplaza con tu ID real
+    const knowledgeBaseArn = 'arn:aws:bedrock:us-east-1:281248178297:knowledge-base/K17E5D1Q2X';
+    const bucket_Name = "info-bootcampinstitute";
+    const dataSourceId = "YQHGCWXWFN";
+    const bucketArn = "arn:aws:s3:::info-bootcampinstitute";
 
-    /** S3 bucket for Bedrock data source */
-    const docsBucket = new s3.Bucket(this, "docsbucket-" + uuid.v4(), {
-      lifecycleRules: [
-        {
-          expiration: Duration.days(10),
-        },
-      ],
-      blockPublicAccess: {
-        blockPublicAcls: true,
-        blockPublicPolicy: true,
-        ignorePublicAcls: true,
-        restrictPublicBuckets: true,
-      },
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      enforceSSL: true,
-      removalPolicy: RemovalPolicy.DESTROY,
-      autoDeleteObjects: true,
-    });
+    const docsBucket = s3.Bucket.fromBucketName(this, 'ExistingDocsBucket', bucket_Name);
 
-    const s3DataSource = new bedrock.S3DataSource(this, "s3DataSource", {
-      bucket: docsBucket,
-      knowledgeBase: knowledgeBase,
-      dataSourceName: "docs",
-      chunkingStrategy: bedrock.ChunkingStrategy.FIXED_SIZE,
-      maxTokens: 500,
-      overlapPercentage: 20,
-    });
-
-    const s3PutEventSource = new S3EventSource(docsBucket, {
+    
+    const s3PutEventSource = new S3EventSource(docsBucket as s3.Bucket, {
       events: [s3.EventType.OBJECT_CREATED_PUT],
     });
 
@@ -76,7 +54,7 @@ export class BackendStack extends Stack {
         functionName: `create-web-data-source`,
         timeout: Duration.minutes(1),
         environment: {
-          KNOWLEDGE_BASE_ID: knowledgeBase.knowledgeBaseId,
+          KNOWLEDGE_BASE_ID: knowledgeBaseId,
         },
       }
     );
@@ -107,20 +85,21 @@ export class BackendStack extends Stack {
       functionName: `start-ingestion-trigger`,
       timeout: Duration.minutes(15),
       environment: {
-        KNOWLEDGE_BASE_ID: knowledgeBase.knowledgeBaseId,
-        DATA_SOURCE_ID: s3DataSource.dataSourceId,
+        KNOWLEDGE_BASE_ID: knowledgeBaseId,
+        DATA_SOURCE_ID: dataSourceId,
         BUCKET_ARN: docsBucket.bucketArn,
       },
     });
 
-    lambdaIngestionJob.addEventSource(s3PutEventSource);
 
     lambdaIngestionJob.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ["bedrock:StartIngestionJob"],
-        resources: [knowledgeBase.knowledgeBaseArn, docsBucket.bucketArn],
+        resources: [knowledgeBaseArn, docsBucket.bucketArn],
       })
     );
+
+    lambdaIngestionJob.addEventSource(s3PutEventSource);
 
     /** Web crawler ingest Lambda */
 
@@ -130,16 +109,15 @@ export class BackendStack extends Stack {
       functionName: `start-web-crawl-trigger`,
       timeout: Duration.minutes(15),
       environment: {
-        KNOWLEDGE_BASE_ID: knowledgeBase.knowledgeBaseId,
-        DATA_SOURCE_ID:
-          createWebDataSourceResource.getAttString("DataSourceId"),
+        KNOWLEDGE_BASE_ID: knowledgeBaseId,
+        DATA_SOURCE_ID: dataSourceId,
       },
     });
 
     lambdaCrawlJob.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ["bedrock:StartIngestionJob"],
-        resources: [knowledgeBase.knowledgeBaseArn],
+        resources: [knowledgeBaseArn],
       })
     );
 
@@ -157,9 +135,8 @@ export class BackendStack extends Stack {
       functionName: `update-web-crawl-urls`,
       timeout: Duration.minutes(15),
       environment: {
-        KNOWLEDGE_BASE_ID: knowledgeBase.knowledgeBaseId,
-        DATA_SOURCE_ID:
-          createWebDataSourceResource.getAttString("DataSourceId"),
+        KNOWLEDGE_BASE_ID: knowledgeBaseId,
+        DATA_SOURCE_ID: dataSourceId,
         DATA_SOURCE_NAME: "WebCrawlerDataSource",
       },
     });
@@ -167,7 +144,7 @@ export class BackendStack extends Stack {
     lambdaUpdateWebUrls.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ["bedrock:GetDataSource", "bedrock:UpdateDataSource"],
-        resources: [knowledgeBase.knowledgeBaseArn],
+        resources: [knowledgeBaseArn],
       })
     );
 
@@ -179,16 +156,15 @@ export class BackendStack extends Stack {
       functionName: `get-web-crawl-urls`,
       timeout: Duration.minutes(15),
       environment: {
-        KNOWLEDGE_BASE_ID: knowledgeBase.knowledgeBaseId,
-        DATA_SOURCE_ID:
-          createWebDataSourceResource.getAttString("DataSourceId"),
+        KNOWLEDGE_BASE_ID: knowledgeBaseId,
+        DATA_SOURCE_ID: dataSourceId,
       },
     });
 
     lambdaGetWebUrls.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ["bedrock:GetDataSource"],
-        resources: [knowledgeBase.knowledgeBaseArn],
+        resources: [knowledgeBaseArn],
       })
     );
 
@@ -199,7 +175,7 @@ export class BackendStack extends Stack {
           "bedrock:UpdateDataSource",
           "bedrock:DeleteDataSource",
         ],
-        resources: [knowledgeBase.knowledgeBaseArn],
+        resources: [knowledgeBaseArn],
       })
     );
 
@@ -222,7 +198,7 @@ export class BackendStack extends Stack {
       //query lambda duration set to match API Gateway max timeout
       timeout: Duration.seconds(29),
       environment: {
-        KNOWLEDGE_BASE_ID: knowledgeBase.knowledgeBaseId,
+        KNOWLEDGE_BASE_ID: knowledgeBaseId,
       },
     });
 
@@ -330,9 +306,8 @@ export class BackendStack extends Stack {
       "WebACLAssociation",
       {
         webAclArn: webACL.attrArn,
-        resourceArn: `arn:aws:apigateway:${Stack.of(this).region}::/restapis/${
-          apiGateway.restApiId
-        }/stages/${apiGateway.deploymentStage.stageName}`,
+        resourceArn: `arn:aws:apigateway:${Stack.of(this).region}::/restapis/${apiGateway.restApiId
+          }/stages/${apiGateway.deploymentStage.stageName}`,
       }
     );
 

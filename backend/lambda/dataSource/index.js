@@ -5,7 +5,7 @@ const {
 } = require("@aws-sdk/client-bedrock-agent");
 const client = new BedrockAgentClient({ region: process.env.AWS_REGION });
 
-const DATA_SOURCE_NAME = "WebCrawlerDataSource";
+const DATA_SOURCE_NAME = "knowledge-base-infobi";
 
 const createDataSource = async () => {
   try {
